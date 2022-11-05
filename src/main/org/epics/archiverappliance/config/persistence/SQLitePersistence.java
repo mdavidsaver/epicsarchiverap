@@ -91,7 +91,30 @@ public class SQLitePersistence implements ConfigPersistence {
 		}
 
 		configlogger.info("Loading SQLite data from " + pathToConfigData);
-		
+
+		try {
+			int schemaVer = 0; // default in new .db
+			try(Statement stmt = theConnection.createStatement()) {
+				try(ResultSet rs = stmt.executeQuery("pragma user_version")) {
+					rs.next();
+					schemaVer = rs.getInt(1);
+				}
+			}
+
+			if(schemaVer == 0) {
+				migrateTo1();
+				schemaVer = 1;
+			}
+
+			if(schemaVer == 1) { // up to date
+				configlogger.info(String.format("Schema at version %d", schemaVer));
+			} else {
+				throw new ConfigException(String.format("migration from schema version %d not supported", schemaVer));
+			}
+		} catch(SQLException ex) {
+			throw new ConfigException("Error during schema migration of " + pathToConfigData, ex);
+		}
+
 //		try {
 //			preLoadTypeInfos();
 //		} catch(IOException ex) { 
@@ -118,7 +141,18 @@ public class SQLitePersistence implements ConfigPersistence {
 				stmt.executeUpdate("CREATE TABLE PVAliases ( pvName TEXT NOT NULL PRIMARY KEY, realName TEXT NOT NULL)");
 				stmt.executeUpdate("CREATE TABLE ArchivePVRequests ( pvName TEXT NOT NULL PRIMARY KEY, userParams TEXT NOT NULL)");
 				stmt.executeUpdate("CREATE TABLE ExternalDataServers ( serverid TEXT NOT NULL PRIMARY KEY, serverinfo TEXT NOT NULL)");
+				// implied: pragma user_version = 0
 			}
+		}
+	}
+	
+	private void migrateTo1() throws SQLException {
+		try(Statement stmt = theConnection.createStatement()) {
+			stmt.executeUpdate("CREATE UNIQUE INDEX PVTypeInfo_pvName ON PVTypeInfo(pvName)");
+			stmt.executeUpdate("CREATE UNIQUE INDEX PVAliases_pvName ON PVAliases(pvName)");
+			stmt.executeUpdate("CREATE UNIQUE INDEX ArchivePVRequests_pvName ON ArchivePVRequests(pvName)");
+			stmt.executeUpdate("CREATE UNIQUE INDEX ExternalDataServers_serverid ON ExternalDataServers(serverid)");
+			stmt.executeUpdate("PRAGMA user_version = 1");
 		}
 	}
 	
